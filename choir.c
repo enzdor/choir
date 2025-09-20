@@ -36,8 +36,8 @@ void init_data(data* d, int cols, int rows)
 	d->y = malloc(rows * sizeof(float));
 	d->x = malloc(rows * sizeof(float) * cols);
 
-	for (int i = 0; i < rows; i++) {
-		d->x[i] = calloc(cols, sizeof(float));
+	for (int i = 0; i < cols - 1; i++) {
+		d->x[i] = calloc(rows, sizeof(float));
 	}
 	d->n_cases = rows;
 	d->n_features = cols - 1;
@@ -47,7 +47,7 @@ void free_data(data* d)
 {
 	if (!d) return;
 
-	for (int i = 0; i < d->n_cases; i++) {
+	for (int i = 0; i < d->n_features; i++) {
 		free(d->x[i]);
 	}
 	free(d->y);
@@ -116,16 +116,6 @@ int comparison(const void* a, const void* b)
 	else return 1;
 }
 
-void transpose_x(float** x, float** new_x, int n_cases, int n_features)
-{
-	for (int i = 0; i < n_cases; i++) {
-		for (int j = 0; j < n_features; j++) {
-			printf("%f, case %d feature %d\n", x[i][j], i, j);
-			new_x[j][i] = x[i][j];
-		}
-	}
-}
-
 float get_node_misclassification_rate(float* y, float estimated_y, int n_cases)
 {
 	float acc = 0;
@@ -143,11 +133,15 @@ float get_best_split(float* y, float* x, int n_cases)
 	float xs[n_cases];
 	float splits[n_cases - 1][4];
 
-	memcpy(&xs, &x, sizeof(float) * n_cases);
+	memcpy(xs, x, sizeof(float) * n_cases);
 	qsort(xs, n_cases, sizeof(float), comparison);
 
-	for (int i = 0; i <= n_cases - 1; i++) {
-		splits[i][0] = (x[i] + x[i + 1]) / 2;
+	for (int i = 0; i < n_cases - 1; i++) {
+		memset(splits[i], 0, sizeof(float) * 4);
+	}
+
+	for (int i = 0; i < n_cases - 1; i++) {
+		splits[i][0] = (xs[i] + xs[i + 1]) / 2;
 
 		float y_estimate_left = 0; 
 		float y_estimate_right = 0; 
@@ -157,7 +151,7 @@ float get_best_split(float* y, float* x, int n_cases)
 		float* y_right;
 
 		for (int j = 0; j < n_cases; j++) {
-			if (x[j] > splits[i][0]) {
+			if (xs[j] > splits[i][0]) {
 				y_estimate_left += y[j];
 				n_left++;
 			} else {
@@ -176,7 +170,7 @@ float get_best_split(float* y, float* x, int n_cases)
 			int l_c = 0;
 			int r_c = 0;
 
-			if (x[j] > splits[i][0]) {
+			if (xs[j] > splits[i][0]) {
 				y_left[l_c] = y[j];
 				l_c++;
 			} else {
@@ -278,8 +272,7 @@ int main(int argc, char* argv[])
             if (j == 1) {
 				d.y[i] = el;
             } else {
-				printf("case is %d and col is %d and float is %f\n", i, j, el);
-				d.x[i][j - 2] = el;
+				d.x[j - 2][i] = el;
             }
             free(tmp);
 		}
@@ -291,28 +284,11 @@ int main(int argc, char* argv[])
 	node root_node;
 
 	root_node.y = d.y;
-	root_node.x = malloc(sizeof(float) * d.n_cases * d.n_features);
-
-	for (int i = 0; i < d.n_features; i++) {
-		root_node.x[i] = calloc(d.n_cases, sizeof(float));
-	}
-
-	for (int i = 0; i < d.n_cases; i++) {
-		printf("%f\n", root_node.x[0][i]);
-	}
-
-	transpose_x(d.x, root_node.x, d.n_cases, d.n_features);
+	root_node.x = d.x;
 
 	root_node.splitting_value = get_best_split(root_node.y, root_node.x[0], d.n_cases);
 
 	printf("%f\n", root_node.splitting_value);
-
-	// TODO: root_node.x has rows as case and each row has the measurement
-	// vector for each case, how it should be structured is that each row
-	// contains all of the values for an x_m ordered in the same way as
-	// root_node.y
-
-	// TODO: create init and free functions for nodes
 
 	// maybe just store the data in d.x already transposed so no need for 
 	// function
@@ -323,9 +299,5 @@ int main(int argc, char* argv[])
     }
 
 	free_data(&d);
-	for (int i = 0; i < d.n_features; i++) {
-		free(root_node.x[i]);
-	}
-	free(root_node.x);
     return 0;
 }
