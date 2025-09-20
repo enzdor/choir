@@ -124,7 +124,7 @@ float get_node_misclassification_rate(float* y, float estimated_y, int n_cases)
 	return acc / n_cases;
 }
 
-float get_best_split(float* y, float* x, int n_cases)
+void get_best_split_for_x(float* res, float* y, float* x, int n_cases)
 {
 	// split_value | misclassification left | misclassification right | decrease
 	float xs[n_cases];
@@ -189,6 +189,27 @@ float get_best_split(float* y, float* x, int n_cases)
 	for (int i = 0; i < n_cases - 1; i++) {
 		if (splits[i][3] > largest_decrease) {
 			largest_decrease = splits[i][0];
+			largest_index = i;
+		}
+	}
+
+	memcpy(res, splits[largest_index], sizeof(float) * 4);
+}
+
+float get_best_split(float* y, float** x, int n_cases, int n_features)
+{
+	float splits[n_features][4];
+
+	for (int i = 0; i < n_features; i++) {
+		get_best_split_for_x(splits[i], y, x[i], n_cases);
+	}
+
+	int largest_index = 0;
+	float largest_decrease = splits[0][3];
+	for (int i = 0; i < n_features; i++) {
+		if (splits[i][3] > largest_decrease) {
+			largest_decrease = splits[i][0];
+			largest_index = i;
 		}
 	}
 
@@ -288,7 +309,7 @@ int main(int argc, char* argv[])
 
 	root_node.y = d.y;
 	root_node.x = d.x;
-	root_node.splitting_value = get_best_split(root_node.y, root_node.x[0], d.n_cases);
+	root_node.splitting_value = get_best_split(root_node.y, root_node.x, d.n_cases, d.n_features);
 
 	printf("%f is the split\n", root_node.splitting_value);	
 
