@@ -12,8 +12,6 @@
 #include <time.h>
 #include <unistd.h>
 
-enum signs { GREATER, LESS };
-
 typedef struct {
 	int n_cases;
 	int n_features;
@@ -26,7 +24,6 @@ typedef struct {
 	struct node* child_left;
 	struct node* child_right;
 	float splitting_value;
-	enum signs splitting_sign;
 	float* y;
 	float** x;
 } node;
@@ -124,12 +121,12 @@ float get_node_misclassification_rate(float* y, float estimated_y, int n_cases)
 		acc += powf(y[i] - estimated_y, 2);
 	}
 
-	return acc;
+	return acc / n_cases;
 }
 
 float get_best_split(float* y, float* x, int n_cases)
 {
-	// split_value | misclassification left | misclassification right | misclassification children
+	// split_value | misclassification left | misclassification right | decrease
 	float xs[n_cases];
 	float splits[n_cases - 1][4];
 
@@ -187,15 +184,15 @@ float get_best_split(float* y, float* x, int n_cases)
 		free(y_right);
 	}
 
-	int smallest_index = 0;
-	float smallest = splits[0][3];
+	int largest_index = 0;
+	float largest_decrease = splits[0][3];
 	for (int i = 0; i < n_cases - 1; i++) {
-		if (splits[i][3] < smallest) {
-			smallest = splits[i][0];
+		if (splits[i][3] > largest_decrease) {
+			largest_decrease = splits[i][0];
 		}
 	}
 
-	return smallest;
+	return largest_decrease;
 }
 
 int main(int argc, char* argv[])
@@ -258,6 +255,12 @@ int main(int argc, char* argv[])
     rewind(fp);
 
     for (int i = 0; (read = getline(&line, &line_len, fp)) != -1; i++) {
+
+		if (errno != 0) {
+			fprintf(stderr, "error in getline: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
+		}
+
 		for (int j = 1; j <= cols; j++) {
 			char* tmp = strdup(line);
             if (tmp == NULL) {
@@ -285,18 +288,9 @@ int main(int argc, char* argv[])
 
 	root_node.y = d.y;
 	root_node.x = d.x;
-
 	root_node.splitting_value = get_best_split(root_node.y, root_node.x[0], d.n_cases);
 
-	printf("%f\n", root_node.splitting_value);
-
-	// maybe just store the data in d.x already transposed so no need for 
-	// function
-
-    if (errno != 0) {
-        fprintf(stderr, "error in getline: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
+	printf("%f is the split\n", root_node.splitting_value);	
 
 	free_data(&d);
     return 0;
