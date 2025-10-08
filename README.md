@@ -1,12 +1,12 @@
 # Choir
 
-Create classification and regression trees based on CART book by Breiman et al.
+Create regression trees based on CART book by Breiman et al.
 
 ## TODO
 
-- Do classification and regression trees
-- Read CSV
-	- separate vars into ordered and categorical
+- Free tree
 - Splitting
 - Pruning
-- Classification
+- Read CSV
+	- separate vars into ordered and categorical
+- for x switch to flattened 2d array instead of true 2d array
