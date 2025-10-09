@@ -33,6 +33,7 @@ struct node {
 	int* indices;
 	int n_cases;
 	int n_features;
+	bool terminal;
 };
 
 void init_data(data* d, int cols, int rows)
@@ -78,10 +79,12 @@ void init_node(struct node* n, double* y, double** x, int n_cases, int n_feature
 	n->child_right = NULL;
 	n->splitting_value = 0;
 	n->y_estimate = 0;
+	n->mse = 0;
 	n->y = y;
 	n->x = x;
 	n->n_cases = n_cases;
 	n->n_features = n_features;
+	n->terminal = true;
 	
 	n->indices = calloc(n_cases, sizeof(int));	
 }
@@ -297,6 +300,7 @@ void set_best_split(struct node* n)
 void grow(struct node* parent)
 {
 	if (parent->n_cases < 5) return;
+	parent->terminal = false;
 
     int n_left = 0, n_right = 0;
 
@@ -309,52 +313,66 @@ void grow(struct node* parent)
 		}
 	}
 
-	printf("splitting value: %f\nx: %d\nn: %d\n", parent->splitting_value, parent->x_split, parent->n_cases);
+	// printf("splitting value: %f\nx: %d\nn: %d\n", parent->splitting_value, parent->x_split, parent->n_cases);
+
+	struct node child_left;
+
+	init_node(&child_left, parent->y, parent->x, n_left, parent->n_features);
+	child_left.parent = parent;
+	child_left.n_cases = n_left;
+	parent->child_left = &child_left;
+
+	int n_l = 0;
+
+	for (int i = 0; i < parent->n_cases; i++) {
+		if (parent->x[parent->x_split][parent->indices[i]] 
+			< parent->splitting_value) {
+			child_left.indices[n_l++] = i;
+		} 
+	}
+
+	child_left.y_estimate = get_y_estimate(&child_left);
+	child_left.mse = get_mse(&child_left);
 
 	if (n_left > 5) {
-		struct node child_left;
-
-		init_node(&child_left, parent->y, parent->x, n_left, parent->n_features);
-		child_left.parent = parent;
-		child_left.n_cases = n_left;
-
-		int n_l = 0;
-
-		for (int i = 0; i < parent->n_cases; i++) {
-			if (parent->x[parent->x_split][parent->indices[i]] 
-				< parent->splitting_value) {
-				child_left.indices[n_l++] = i;
-			} 
-		}
-
-		child_left.y_estimate = get_y_estimate(&child_left);
-		child_left.mse = get_mse(&child_left);
 		set_best_split(&child_left);
-
 		grow(&child_left);
 	}
 
-	if (n_right > 5) {
-		struct node child_right;
+	struct node child_right;
 
-		init_node(&child_right, parent->y, parent->x, n_right, parent->n_features);
-		child_right.parent = parent;
-		child_right.n_cases = n_right;
+	init_node(&child_right, parent->y, parent->x, n_right, parent->n_features);
+	child_right.parent = parent;
+	child_right.n_cases = n_right;
+	parent->child_right = &child_right;
 
-		int n_r = 0;
+	int n_r = 0;
 
-		for (int i = 0; i < parent->n_cases; i++) {
-			if (parent->x[parent->x_split][parent->indices[i]] 
-				> parent->splitting_value) {
-				child_right.indices[n_r++] = i;
-			}
+	for (int i = 0; i < parent->n_cases; i++) {
+		if (parent->x[parent->x_split][parent->indices[i]] 
+			> parent->splitting_value) {
+			child_right.indices[n_r++] = i;
 		}
+	}
 
-		child_right.y_estimate = get_y_estimate(&child_right);
-		child_right.mse = get_mse(&child_right);
+	child_right.y_estimate = get_y_estimate(&child_right);
+	child_right.mse = get_mse(&child_right);
+
+	if (n_right > 5) {
 		set_best_split(&child_right);
-
 		grow(&child_right);
+	}
+}
+
+void free_tree(struct node* parent)
+{
+	if (!parent) return;
+	
+	if (parent->terminal) {
+		free_node(parent);
+	} else {
+		free_tree(parent->child_left);
+		free_tree(parent->child_right);
 	}
 }
 
@@ -449,10 +467,7 @@ int main(int argc, char* argv[])
 		ind[i] = i;
 	}
 
-	root_node.y = d.y;
-	root_node.x = d.x;
-	root_node.n_cases = d.n_cases;
-	root_node.n_features = d.n_features;
+	init_node(&root_node, d.y, d.x, d.n_cases, d.n_features);
 	root_node.indices = ind;
 	root_node.y_estimate = get_y_estimate(&root_node);
 	root_node.mse = get_mse(&root_node);
@@ -460,6 +475,7 @@ int main(int argc, char* argv[])
 
 	grow(&root_node);
 
+	free_tree(&root_node);
 	free_data(&d);
     return 0;
 }
