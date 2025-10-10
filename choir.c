@@ -40,19 +40,19 @@ void init_data(data* d, int cols, int rows)
 {
 	// TODO: fix memory allocation here
 	d->y = calloc(rows, sizeof(double));
-	if (errno != 0) {
+	if (!d->y) {
 		fprintf(stderr, "error in calloc: %s\n", strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 	d->x = malloc((cols - 1) * sizeof(double *));
-	if (errno != 0) {
+	if (!d->x) {
 		fprintf(stderr, "error in malloc: %s\n", strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 
 	for (int i = 0; i < cols - 1; i++) {
 		d->x[i] = calloc(rows, sizeof(double));
-		if (errno != 0) {
+		if (!d->x[i]) {
 			fprintf(stderr, "error in calloc: %s\n", strerror(errno));
 			exit(EXIT_FAILURE);
 		}
@@ -82,11 +82,15 @@ void init_node(struct node* n, double* y, double** x, int n_cases, int n_feature
 	n->mse = 0;
 	n->y = y;
 	n->x = x;
+	n->x_split = 0;
+	n->indices = calloc(n_cases, sizeof(int));	
+	if (!n->indices) {
+		fprintf(stderr, "error in calloc: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
 	n->n_cases = n_cases;
 	n->n_features = n_features;
 	n->terminal = true;
-	
-	n->indices = calloc(n_cases, sizeof(int));	
 }
 
 void free_node(struct node* n)
@@ -94,6 +98,7 @@ void free_node(struct node* n)
 	if (!n) return;
 
 	free(n->indices);
+	free(n);
 }
 
 int get_n_columns(char* line)
@@ -135,21 +140,6 @@ const char* get_csv_element(char* line, int num)
     return NULL;
 }
 
-/*
-double get_mean(double* vals, int n_cases)
-{
-    if (n_cases < 1) return 0;
-
-    double sum = 0;
-
-    for (int i = 0; i < n_cases; i++) {
-        sum += vals[i];
-    }
-
-    return sum / n_cases;
-}
-*/
-
 double get_y_estimate(struct node* n)
 {
     double sum = 0;
@@ -166,7 +156,8 @@ double get_mse(struct node* n)
 	double acc = 0;
 
 	for (int i = 0; i < n->n_cases; i++) {
-		acc += powf(n->y[n->indices[i]] - n->y_estimate, 2);
+		acc += (n->y[n->indices[i]] - n->y_estimate) *
+			(n->y[n->indices[i]] - n->y_estimate);
 	}
 
 	return acc / n->n_cases;
@@ -174,26 +165,13 @@ double get_mse(struct node* n)
 
 int comparison(const void* a, const void* b)
 {
-	double f_a = * ( (double *) a);
-	double f_b = * ( (double *) b);
+	double f_a = * ((double *) a);
+	double f_b = * ((double *) b);
 
-	if ( f_a == f_b ) return 0;
+	if (f_a == f_b) return 0;
 	else if (f_a < f_b) return -1;
 	else return 1;
 }
-
-/*
-double get_node_misclassification_rate(double* y, double estimated_y, int n_cases)
-{
-	double acc = 0;
-
-	for (int i = 0; i < n_cases; i++) {
-		acc += powf(y[i] - estimated_y, 2);
-	}
-
-	return acc / n_cases;
-}
-*/
 
 void get_best_split_for_x(double* res, struct node* n, int x_i)
 {
@@ -246,9 +224,11 @@ void get_best_split_for_x(double* res, struct node* n, int x_i)
 
 		for (int j = 0; j < n->n_cases; j++) {
 			if (n->x[x_i][n->indices[j]] > splits[i][0]) {
-				acc_l += powf(n->y[n->indices[j]] - y_estimate_left, 2);
+				acc_l += (n->y[n->indices[j]] - y_estimate_left) * 
+					(n->y[n->indices[j]] - y_estimate_left);
 			} else {
-				acc_r += powf(n->y[n->indices[j]] - y_estimate_right, 2);
+				acc_r += (n->y[n->indices[j]] - y_estimate_right) *
+					(n->y[n->indices[j]] - y_estimate_right);
 			}
 		}
 		
@@ -300,7 +280,6 @@ void set_best_split(struct node* n)
 void grow(struct node* parent)
 {
 	if (parent->n_cases < 5) return;
-	parent->terminal = false;
 
     int n_left = 0, n_right = 0;
 
@@ -313,54 +292,54 @@ void grow(struct node* parent)
 		}
 	}
 
-	// printf("splitting value: %f\nx: %d\nn: %d\n", parent->splitting_value, parent->x_split, parent->n_cases);
+	if (n_left == 0 || n_right == 0) return;
 
-	struct node child_left;
+	parent->terminal = false;
 
-	init_node(&child_left, parent->y, parent->x, n_left, parent->n_features);
-	child_left.parent = parent;
-	child_left.n_cases = n_left;
-	parent->child_left = &child_left;
+	printf("splitting value: %f\nx: %d\nn: %d\n", parent->splitting_value, parent->x_split, parent->n_cases);
+
+	struct node *child_left = malloc(sizeof(struct node));
+	struct node *child_right = malloc(sizeof(struct node));
+
+	if (!child_left || !child_right) {
+		fprintf(stderr, "error in malloc: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
+	init_node(child_left, parent->y, parent->x, n_left, parent->n_features);
+	child_left->parent = parent;
+	parent->child_left = child_left;
+
+	init_node(child_right, parent->y, parent->x, n_right, parent->n_features);
+	child_right->parent = parent;
+	parent->child_right = child_right;
 
 	int n_l = 0;
-
-	for (int i = 0; i < parent->n_cases; i++) {
-		if (parent->x[parent->x_split][parent->indices[i]] 
-			< parent->splitting_value) {
-			child_left.indices[n_l++] = i;
-		} 
-	}
-
-	child_left.y_estimate = get_y_estimate(&child_left);
-	child_left.mse = get_mse(&child_left);
-
-	if (n_left > 5) {
-		set_best_split(&child_left);
-		grow(&child_left);
-	}
-
-	struct node child_right;
-
-	init_node(&child_right, parent->y, parent->x, n_right, parent->n_features);
-	child_right.parent = parent;
-	child_right.n_cases = n_right;
-	parent->child_right = &child_right;
-
 	int n_r = 0;
 
 	for (int i = 0; i < parent->n_cases; i++) {
 		if (parent->x[parent->x_split][parent->indices[i]] 
-			> parent->splitting_value) {
-			child_right.indices[n_r++] = i;
+			< parent->splitting_value) {
+			child_left->indices[n_l++] = parent->indices[i];
+		} else {
+			child_right->indices[n_r++] = parent->indices[i];
 		}
 	}
 
-	child_right.y_estimate = get_y_estimate(&child_right);
-	child_right.mse = get_mse(&child_right);
+	child_left->y_estimate = get_y_estimate(child_left);
+	child_left->mse = get_mse(child_left);
+
+	child_right->y_estimate = get_y_estimate(child_right);
+	child_right->mse = get_mse(child_right);
+
+	if (n_left > 5) {
+		set_best_split(child_left);
+		grow(child_left);
+	}
 
 	if (n_right > 5) {
-		set_best_split(&child_right);
-		grow(&child_right);
+		set_best_split(child_right);
+		grow(child_right);
 	}
 }
 
@@ -373,6 +352,7 @@ void free_tree(struct node* parent)
 	} else {
 		free_tree(parent->child_left);
 		free_tree(parent->child_right);
+		free_node(parent);
 	}
 }
 
@@ -460,22 +440,19 @@ int main(int argc, char* argv[])
     free(line);
     fclose(fp);
 
-	struct node root_node;
-	int ind[d.n_cases];
+	struct node *root_node = malloc(sizeof(struct node));
 
+	init_node(root_node, d.y, d.x, d.n_cases, d.n_features);
 	for (int i = 0; i < d.n_cases; i++) {
-		ind[i] = i;
+		root_node->indices[i] = i;
 	}
+	root_node->y_estimate = get_y_estimate(root_node);
+	root_node->mse = get_mse(root_node);
+	set_best_split(root_node);
 
-	init_node(&root_node, d.y, d.x, d.n_cases, d.n_features);
-	root_node.indices = ind;
-	root_node.y_estimate = get_y_estimate(&root_node);
-	root_node.mse = get_mse(&root_node);
-	set_best_split(&root_node);
+	grow(root_node);
 
-	grow(&root_node);
-
-	free_tree(&root_node);
+	free_tree(root_node);
 	free_data(&d);
     return 0;
 }
