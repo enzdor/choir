@@ -33,8 +33,12 @@ struct node {
 	int* indices;
 	int n_cases;
 	int n_features;
-	bool terminal;
 };
+
+struct alpha_pair {
+	double value;
+	struct node* node_ptr;
+}
 
 void init_data(data* d, int cols, int rows)
 {
@@ -90,7 +94,6 @@ void init_node(struct node* n, double* y, double** x, int n_cases, int n_feature
 	}
 	n->n_cases = n_cases;
 	n->n_features = n_features;
-	n->terminal = true;
 }
 
 void free_node(struct node* n)
@@ -170,6 +173,16 @@ int comparison(const void* a, const void* b)
 
 	if (f_a == f_b) return 0;
 	else if (f_a < f_b) return -1;
+	else return 1;
+}
+
+int comparison_alpha(const void* a, const void* b)
+{
+	struct pair *p_a =  (struct alpha_pair *) a;
+	struct pair *p_b =  (struct alpha_pair *) b;
+
+	if (p_a->value == p_b->value) return 0;
+	else if (p_a->value < p_b->value) return -1;
 	else return 1;
 }
 
@@ -294,8 +307,6 @@ void grow(struct node* parent)
 
 	if (n_left == 0 || n_right == 0) return;
 
-	parent->terminal = false;
-
 	printf("splitting value: %f\nx: %d\nn: %d\n", parent->splitting_value, parent->x_split, parent->n_cases);
 
 	struct node *child_left = malloc(sizeof(struct node));
@@ -347,13 +358,156 @@ void free_tree(struct node* parent)
 {
 	if (!parent) return;
 	
-	if (parent->terminal) {
+	if (!parent->child_left && !parent->child_right) {
 		free_node(parent);
 	} else {
 		free_tree(parent->child_left);
 		free_tree(parent->child_right);
 		free_node(parent);
 	}
+}
+
+void get_total_t_nodes (struct node* parent, int* total)
+{
+	if (!parent) return;
+	
+	if (!parent->child_left && !parent->child_right) {
+		*total++;
+	} else {
+		get_total_t_nodes(parent->child_left, total);
+		get_total_t_nodes(parent->child_right, total);
+	}
+}
+
+double get_alpha (struct node* parent, int t_nodes)
+{
+	if (!parent || (!parent->child_left && !parent->child_right)) return -1;
+
+	return ((parent->mse - (parent->child_left->mse + parent->child_right->mse))
+		/ t_nodes - 1);
+}
+
+void prune(struct node* parent)
+{
+	int n_trees = -1;
+	int t_nodes = 0;
+	get_total_t_nodes(parent, &t_nodes);
+	double depth = log2(t_nodes);
+
+	struct node*** terminal_nodes = malloc(depth * sizeof(struct node**));
+	if (!terminal_nodes) {
+		fprintf(stderr, "error in malloc: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
+	for (int i = 0; i < depth; i++) {
+		terminal_nodes[i] = malloc(pow(2, depth - i) * sizeof(struct node*));
+		if (!terminal_nodes[i]) {
+			fprintf(stderr, "error in malloc: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	int* n_terminal_nodes = calloc(depth, sizeof(int));
+	if (!n_terminal_nodes) {
+		fprintf(stderr, "error in calloc: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+	n_terminal_nodes[0] = t_nodes;
+
+	for (int i = 0; !finished; i++) {
+		int n_parents = n_terminal_nodes[i] / 2;
+		struct alpha_pair *pairs = malloc(n_parents * sizeof(struct alpha_pair));
+		if (!pairs) {
+			fprintf(stderr, "error in calloc: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
+		}
+
+		for (int j = 0; j < n_parents; j++) {
+			pairs[j].value = get_alpha(terminal_nodes[i][j * 2], n_terminal_nodes[i]);
+			pairs[j].node_ptr = terminal_nodes[0][j * 2];
+		}
+
+		qsort(pairs, n_parents, sizeof(double), comparison);
+
+		int to_prune = 1;
+		// to prune their children
+		for (int j = 1; j < n_parents; j++) {
+			if (pairs.value[0] - pairs.value[0] * 0.1 > pairs.value[j] && 
+				pairs.value[0] + pairs.value[0] * 0.1 < pairs.value[j]) {
+				to_prune++;
+			}
+		}
+
+		struct node** will_prune = malloc(to_prune * 2 * sizeof(struct node*));
+
+		for (int j = 0; j < to_prune; j++) {
+			will_prune[j * 2] = pairs[j].node_ptr->child_left;
+			will_prune[(j * 2) + 1] = pairs[j].node_ptr->child_right;
+		}
+
+		int index = 0;
+
+		for (int j = 0; j < n_terminal_nodes[i]; j++) {
+			bool need_to_prune = false;
+
+			for (int k = 0; k < to_prune; k++) {
+				if (terminal_nodes[i][j] == will_prune[k]) need_to_prune = true;
+			}
+
+			if (need_to_prune) {
+				terminal_nodes[i + 1][index++] = terminal_nodes[i][j++]->parent;
+			} else {
+				terminal_nodes[i + 1][index++] = terminal_nodes[i][j];
+			}
+
+		}
+	
+	/*
+		- Once alphas with node pointers are sorted, store the node pointers
+		of the children in an array. 
+		- Then, go through the terminal nodes in the previous tree and add those 
+		that do not need to be pruned to the terminal nodes of the next tree.
+		- When the ones that do need to be pruned are found, add their parents
+		to the list of terminal nodes instead.
+	*/
+
+	/*
+		- Calculate g1 for the parents of all the terminal nodes
+		- Order the g1s from smallest to greatest
+		- "Prune" the weakest link(s)
+		- Save the new set of terminal nodes in the array of terminal
+		nodes
+	*/
+
+	}
+	
+	/*
+
+	- Find decreasing sequence of subtrees
+		- How to store it
+
+		Store array of array of node pointers. Each array of node pointers
+		contains the pointers to the terminal nodes of the tree. As the se-
+		quence of trees grows, the sequence of array grows too with the
+		pointers to the terminal nodes of the subsequent trees.
+
+		- Calculate cost complexity and find alpha
+
+		Store array with number of terminal nodes per tree in the sequence.
+		Calculate the g1 (see notes) for all of the parent nodes of the
+		terminal nodes in the array of nodes declared above and find the
+		weakest link or links.
+
+	- Estimate error with test sample
+		
+		Abstract to another func?
+
+	- Choose best tree
+
+		Use 1SE rule
+
+	*/
 }
 
 int main(int argc, char* argv[])
@@ -441,6 +595,10 @@ int main(int argc, char* argv[])
     fclose(fp);
 
 	struct node *root_node = malloc(sizeof(struct node));
+	if (!root_node) {
+		fprintf(stderr, "error in malloc: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
 
 	init_node(root_node, d.y, d.x, d.n_cases, d.n_features);
 	for (int i = 0; i < d.n_cases; i++) {
